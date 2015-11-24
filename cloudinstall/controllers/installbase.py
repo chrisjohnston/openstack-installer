@@ -21,6 +21,7 @@ from cloudinstall.config import (INSTALL_TYPE_SINGLE,
                                  INSTALL_TYPE_LANDSCAPE)
 from cloudinstall.state import InstallState
 from cloudinstall.alarms import AlarmMonitor
+from cloudinstall.ev import EventLoop
 import cloudinstall.utils as utils
 from cloudinstall.config import OPENSTACK_RELEASE_LABELS
 from cloudinstall.controllers.install import (SingleInstall,
@@ -40,10 +41,9 @@ class InstallController:
     MultiInstallExistingMaas = MultiInstallExistingMaas
     LandscapeInstall = LandscapeInstall
 
-    def __init__(self, ui, config, loop):
+    def __init__(self, ui, config):
         self.ui = ui
         self.config = config
-        self.loop = loop
         self.install_type = None
         self.config.setopt('current_state', InstallState.RUNNING.value)
         if not self.config.getopt('headless'):
@@ -88,7 +88,7 @@ class InstallController:
                                                  api_key=maas_apikey))
             log.info("Performing a Multi Install with existing MAAS")
             return self.MultiInstallExistingMaas(
-                self.loop, self.ui, self.config).run()
+                self.ui, self.config).run()
         else:
             self.ui.status_error_message('Please enter the MAAS server\'s '
                                          'IP address and API key to proceed.')
@@ -101,9 +101,9 @@ class InstallController:
             pass
         elif self.config.getopt('current_state') == InstallState.NODE_WAIT:
             self.ui.render_machine_wait_view(self.config)
-            self.loop.redraw_screen()
+            EventLoop.redraw_screen()
 
-        AlarmMonitor.add_alarm(self.loop.set_alarm_in(1, self.update),
+        AlarmMonitor.add_alarm(EventLoop.set_alarm_in(1, self.update),
                                "installcontroller-update")
 
     def do_install(self):
@@ -115,7 +115,7 @@ class InstallController:
         if self.install_type == INSTALL_TYPE_SINGLE[0]:
             self.ui.status_info_message("Performing a Single Install")
             self.SingleInstall(
-                self.loop, self.ui, self.config).run()
+                self.ui, self.config).run()
         elif self.install_type == INSTALL_TYPE_MULTI[0]:
             # TODO: Clean this up a bit more I dont like relying on
             # opts.headless but in a few places
@@ -123,7 +123,7 @@ class InstallController:
                 self.ui.status_info_message(
                     "Performing a Multi install with existing MAAS")
                 self.MultiInstallExistingMaas(
-                    self.loop, self.ui, self.config).run()
+                    self.ui, self.config).run()
             else:
                 self.ui.show_maas_input(
                     "Enter MAAS IP and API Key",
@@ -131,30 +131,40 @@ class InstallController:
         elif self.install_type == INSTALL_TYPE_LANDSCAPE[0]:
             log.info("Performing a OpenStack Autopilot install")
             self.LandscapeInstall(
-                self.loop, self.ui, self.config).run()
+                self.ui, self.config).run()
         else:
             os.remove(os.path.join(self.config.cfg_path, 'installed'))
             raise ValueError("Unknown install type: {}".format(
                 self.install_type))
 
+    def unhandled_input(self, key):
+        if key in ['q', 'Q']:
+            log.debug("q emitted, shutting down.")
+            EventLoop.exit(0)
+
     def start(self):
         """ Start installer eventloop
         """
+
+        EventLoop.build_loop(self.ui, self.config,
+                             unhandled_input=self.unhandled_input)
+
         if self.config.getopt('headless'):
             self.install_type = self.config.getopt('install_type')
             if not self.install_type:
                 log.error('Fatal error: '
                           'Unable to read install type from configuration.')
-                self.loop.exit(1)
+                EventLoop.exit(1)
             try:
                 self.do_install()
             except:
                 log.exception("Fatal error")
-                self.loop.exit(1)
+                EventLoop.exit(1)
 
         else:
             self.ui.select_install_type(
                 self.config.install_types(), self._set_install_type)
 
         self.update()
-        self.loop.run()
+
+        EventLoop.run()

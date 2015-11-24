@@ -377,7 +377,6 @@ class CharmQueue:
     def __init__(self, ui, config, juju_state=None, juju=None,
                  deployed_charms=None):
         self.charm_post_proc_q = Queue()
-        self.is_running = False
         self.ui = ui
         self.config = config
         self.juju = juju

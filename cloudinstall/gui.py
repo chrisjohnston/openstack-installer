@@ -18,7 +18,6 @@
 from __future__ import unicode_literals
 import logging
 
-import urwid
 from urwid import (Text, Pile,
                    Filler, Frame, WidgetWrap)
 
@@ -82,12 +81,16 @@ class Header(WidgetWrap):
 
     def update(self):
         if self.show_add_units:
-            add_unit_string = '(A)dd Services \N{BULLET}'
+            add_unit_string = '(A)dd Services \N{BULLET} '
         else:
-            add_unit_string = ''
-        tw = Color.frame_subheader(Text(add_unit_string + ' (H)elp \N{BULLET} '
-                                        '(R)efresh \N{BULLET} (Q)uit',
-                                        align='center'))
+            add_unit_string = ' '
+        tw = Color.frame_subheader(
+            Text('{} '
+                 '(S)tatus \N{BULLET} '
+                 '(Q)uit \N{BULLET} '
+                 '(R)efresh \N{BULLET} '
+                 '(H)elp'.format(add_unit_string),
+                 align='center'))
         self.pile.contents[1] = (tw, self.pile.options())
 
 
@@ -111,9 +114,9 @@ class InstallHeader(WidgetWrap):
 
 
 class PegasusGUI(WidgetWrap):
-    key_conversion_map = {'tab': 'down', 'shift tab': 'up'}
 
-    def __init__(self, header=None, body=None, footer=None):
+    def __init__(self, config, header=None, body=None, footer=None):
+        self.config = config
         self.header = header if header else Header()
         self.body = body if body else Banner()
         self.footer = footer if footer else StatusBarWidget()
@@ -131,24 +134,9 @@ class PegasusGUI(WidgetWrap):
         super().__init__(self.frame)
 
     def keypress(self, size, key):
-        key = self.key_conversion_map.get(key, key)
+        key_conversion_map = {'tab': 'down', 'shift tab': 'up'}
+        key = key_conversion_map.get(key, key)
         return super().keypress(size, key)
-
-    def focus_next(self):
-        if hasattr(self.frame.body, 'scroll_down'):
-            self.frame.body.scroll_down()
-
-    def focus_previous(self):
-        if hasattr(self.frame.body, 'scroll_up'):
-            self.frame.body.scroll_up()
-
-    def focus_first(self):
-        if hasattr(self.frame.body, 'scroll_top'):
-            self.frame.body.scroll_top()
-
-    def focus_last(self):
-        if hasattr(self.frame.body, 'scroll_bottom'):
-            self.frame.body.scroll_bottom()
 
     def show_help_info(self):
         self.controller = self.frame.body
@@ -191,6 +179,7 @@ class PegasusGUI(WidgetWrap):
         self.frame.set_footer(self.frame.footer)
 
     def render_services_view(self, nodes, juju_state, maas_state, config):
+        self.controller = self.frame.body
         self.services_view = ServicesView(nodes, juju_state, maas_state,
                                           config)
         self.frame.body = self.services_view
@@ -219,16 +208,16 @@ class PegasusGUI(WidgetWrap):
             self.node_install_wait_view = NodeInstallWaitView(message)
         self.frame.body = self.node_install_wait_view
 
-    def render_placement_view(self, loop, config, cb):
+    def render_placement_view(self, config, cb):
         """ render placement view
 
         :param cb: deploy callback trigger
         """
+        self.controller = self.frame.body
         if self.placement_view is None:
             assert self.controller is not None
             pc = self.controller.placement_controller
-            self.placement_view = PlacementView(self, pc, loop,
-                                                config, cb)
+            self.placement_view = PlacementView(self, pc, config, cb)
         self.placement_view.update()
         self.frame.body = self.placement_view
 
@@ -239,7 +228,7 @@ class PegasusGUI(WidgetWrap):
         self.machine_wait_view.update()
         self.frame.body = self.machine_wait_view
 
-    def render_add_services_dialog(self, deploy_cb, cancel_cb):
+    def render_add_services_dialog(self, pc, deploy_cb, cancel_cb):
         def reset():
             self.add_services_dialog = None
 
@@ -252,7 +241,7 @@ class PegasusGUI(WidgetWrap):
             deploy_cb()
 
         if self.add_services_dialog is None:
-            self.add_services_dialog = AddServicesDialog(self.controller,
+            self.add_services_dialog = AddServicesDialog(pc,
                                                          deploy_cb=deploy,
                                                          cancel_cb=cancel)
         self.add_services_dialog.update()
@@ -275,17 +264,9 @@ class PegasusGUI(WidgetWrap):
     def __repr__(self):
         return "<Ubuntu OpenStack Installer GUI Interface>"
 
-    def tasker(self, loop, config):
+    def tasker(self, config):
         """ Interface with Tasker class
 
-        :param loop: urwid.Mainloop
         :param dict config: config object
         """
-        return Tasker(self, loop, config)
-
-    def exit(self, loop=None):
-        """ Provide exit loop helper
-
-        :param loop: Just a placeholder, exit with urwid.
-        """
-        urwid.ExitMainLoop()
+        return Tasker(self, config)

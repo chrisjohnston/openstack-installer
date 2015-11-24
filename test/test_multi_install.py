@@ -31,8 +31,7 @@ class MultiInstallTestCase(unittest.TestCase):
             self.conf = Config({}, tempf.name, save_backups=False)
 
         dc = MagicMock(name="display_controller")
-        loop = MagicMock(name="loop")
-        self.installer = MultiInstall(loop, dc, self.conf)
+        self.installer = MultiInstall(dc, self.conf)
 
     @patch('cloudinstall.utils.get_command_output')
     def test_add_bootstrap_to_no_proxy(self, mock_gco):

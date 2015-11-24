@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 from cloudinstall.config import Config
 from cloudinstall.core import Controller
 from cloudinstall.juju import JujuState
+from cloudinstall.ev import EventLoop
 
 log = logging.getLogger('cloudinstall.test_core')
 
@@ -39,9 +40,9 @@ class WaitForDeployedServicesReadyCoreTestCase(unittest.TestCase):
         self.mock_loop = MagicMock(name='loop')
 
         self.conf.setopt('headless', False)
+        EventLoop.loop = self.mock_loop
         self.dc = Controller(
-            ui=self.mock_ui, config=self.conf,
-            loop=self.mock_loop)
+            ui=self.mock_ui, config=self.conf)
         self.dc.initialize = MagicMock()
         self.dc.juju_state = JujuState(juju=MagicMock())
         self.dc.juju_state.all_agents_started = MagicMock()

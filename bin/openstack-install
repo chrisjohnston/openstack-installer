@@ -32,7 +32,6 @@ from cloudinstall.consoleui import ConsoleUI
 from cloudinstall.controllers.installbase import InstallController
 from cloudinstall.config import Config
 from cloudinstall.ev import EventLoop
-from cloudinstall.alarms import AlarmMonitor
 from cloudinstall import __version__ as version
 
 CFG_FILE = os.path.join(utils.install_home(),
@@ -244,9 +243,9 @@ if __name__ == '__main__':
         sys.exit(1)
 
     if cfg.getopt('headless'):
-        ui = ConsoleUI()
+        ui = ConsoleUI(cfg)
     else:
-        ui = PegasusGUI(header=InstallHeader())
+        ui = PegasusGUI(cfg, header=InstallHeader())
 
     # Set proxy
     if cfg.getopt('http_proxy'):
@@ -257,15 +256,10 @@ if __name__ == '__main__':
         os.environ['https_proxy'] = cfg.getopt('https_proxy')
 
     cfg.setopt('session_id', str(uuid.uuid4()))
-    # Choose event loop
-    ev = EventLoop(ui, cfg, logger)
-
-    # Bind event loops alarm tracking
-    AlarmMonitor.loop = ev
 
     try:
         install = InstallController(
-            ui=ui, config=cfg, loop=ev)
+            ui=ui, config=cfg)
     except:
         print("Unable to start install controller")
         sys.exit(1)
@@ -280,9 +274,8 @@ if __name__ == '__main__':
         import atexit
         atexit.register(partial(utils.cleanup, cfg))
         install.start()
-    except:
-        if opts.debug and not cfg.getopt('headless'):
-            import pdb
-            pdb.post_mortem()
+    except Exception as e:
+        print("Error with openstack-install: {}".format(e))
+        raise e
     finally:
-        sys.exit(ev.error_code)
+        sys.exit(EventLoop.error_code)

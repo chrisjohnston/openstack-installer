@@ -19,8 +19,10 @@ import time
 from os import path, getenv
 
 from operator import attrgetter
+from functools import partial
 
 from cloudinstall import async
+from cloudinstall.ev import EventLoop
 from cloudinstall.config import OPENSTACK_RELEASE_LABELS
 from cloudinstall import utils
 from cloudinstall.alarms import AlarmMonitor
@@ -57,11 +59,10 @@ class Controller:
 
     """ Controller for Juju deployments and Maas machine init """
 
-    def __init__(self, ui, config, loop):
+    def __init__(self, ui, config):
         self.ui = ui
         self.ui.controller = self
         self.config = config
-        self.loop = loop
         self.juju_state = None
         self.juju = None
         self.maas = None
@@ -73,73 +74,6 @@ class Controller:
         if not self.config.getopt('current_state'):
             self.config.setopt('current_state',
                                ControllerState.INSTALL_WAIT.value)
-
-    def update(self, *args, **kwargs):
-        """Render UI according to current state and reset timer
-
-        PegasusGUI only.
-        """
-        interval = 1
-
-        current_state = self.config.getopt('current_state')
-        if current_state == ControllerState.PLACEMENT:
-            self.ui.render_placement_view(self.loop,
-                                          self.config,
-                                          self.commit_placement)
-
-        elif current_state == ControllerState.INSTALL_WAIT:
-            if self.ui.node_install_wait_view is None:
-                self.ui.render_node_install_wait(
-                    message="Installer is initializing nodes. Please wait.")
-            else:
-                self.ui.node_install_wait_view.redraw_kitt()
-            interval = self.config.node_install_wait_interval
-        elif current_state == ControllerState.ADD_SERVICES:
-            def submit_deploy():
-                async.submit(self.deploy_new_services,
-                             self.ui.show_exception_message)
-
-            self.ui.render_add_services_dialog(
-                submit_deploy, self.cancel_add_services)
-        elif current_state == ControllerState.SERVICES:
-            self.update_node_states()
-        else:
-            raise Exception("Internal error, unexpected display "
-                            "state '{}'".format(current_state))
-
-        self.loop.redraw_screen()
-        AlarmMonitor.add_alarm(self.loop.set_alarm_in(interval, self.update),
-                               "core-controller-update")
-
-    def update_node_states(self):
-        """ Updating node states
-
-        PegasusGUI only
-        """
-        if not self.juju_state:
-            return
-        deployed_services = sorted(self.juju_state.services,
-                                   key=attrgetter('service_name'))
-        deployed_service_names = [s.service_name for s in deployed_services]
-
-        charm_classes = sorted(
-            [m.__charm_class__ for m in
-             utils.load_charms(self.config.getopt('charm_plugin_dir'))
-             if m.__charm_class__.charm_name in
-             deployed_service_names],
-            key=attrgetter('charm_name'))
-
-        self.nodes = list(zip(charm_classes, deployed_services))
-
-        if len(self.nodes) == 0:
-            return
-        else:
-            if not self.ui.services_view:
-                self.ui.render_services_view(
-                    self.nodes, self.juju_state,
-                    self.maas_state, self.config)
-            else:
-                self.ui.refresh_services_view(self.nodes, self.config)
 
     def authenticate_juju(self):
         if not len(self.config.juju_env['state-servers']) > 0:
@@ -222,9 +156,7 @@ class Controller:
 
     def commit_placement(self):
         self.config.setopt('current_state', ControllerState.SERVICES.value)
-        self.ui.render_services_view(self.nodes, self.juju_state,
-                                     self.maas_state, self.config)
-        self.loop.redraw_screen()
+        self.update_node_states()
         if self.config.getopt('headless'):
             self.begin_deployment()
         else:
@@ -372,6 +304,7 @@ class Controller:
             self.juju_m_idmap[machine.instance_id] = m_id
 
     def run_apt_go_fast(self, machine_id):
+        self.ui.status_info_message('Configuring optimizations')
         utils.remote_cp(machine_id,
                         src=path.join(self.config.share_path,
                                       "tools/apt-go-fast"),
@@ -383,7 +316,8 @@ class Controller:
 
     def configure_lxc_network(self, machine_id):
         # upload our lxc-host-only template and setup bridge
-        log.info('Copying network specifications to machine')
+        self.ui.status_info_message(
+            'Copying network specifications to host container')
         srcpath = path.join(self.config.tmpl_path, 'lxc-host-only')
         destpath = "/tmp/lxc-host-only"
         utils.remote_cp(machine_id, src=srcpath, dst=destpath,
@@ -460,6 +394,7 @@ class Controller:
     def try_deploy(self, charm_class):
         "returns True if deploy is deferred and should be tried again."
 
+        self.update_node_states()
         charm = charm_class(juju=self.juju,
                             juju_state=self.juju_state,
                             ui=self.ui,
@@ -580,36 +515,29 @@ class Controller:
             async.submit(charm_q.watch_post_proc,
                          self.ui.show_exception_message)
 
-        charm_q.is_running = True
-
         # Exit cleanly if we've finished all deploys, relations,
         # post processing, and running in headless mode.
         if self.config.getopt('headless'):
             while not self.config.getopt('postproc_complete'):
                 self.ui.status_info_message(
                     "Waiting for services to be started.")
-                # FIXME: Is this needed?
-                # time.sleep(10)
+                time.sleep(2)
             self.ui.status_info_message(
                 "All services deployed, relations set, and started")
-            self.loop.exit(0)
+            EventLoop.exit(0)
 
         self.ui.status_info_message(
             "Services deployed, relationships still pending."
             " Please wait for all relations to be set before"
             " deploying additional services.")
-        self.ui.render_services_view(self.nodes, self.juju_state,
-                                     self.maas_state, self.config)
-        self.loop.redraw_screen()
+        self.update_node_states()
 
     def deploy_new_services(self):
         """Deploys newly added services in background thread.
         Does not attempt to create new machines.
         """
         self.config.setopt('current_state', ControllerState.SERVICES.value)
-        self.ui.render_services_view(self.nodes, self.juju_state,
-                                     self.maas_state, self.config)
-        self.loop.redraw_screen()
+        self.update_node_states()
 
         self.deploy_using_placement()
         self.wait_for_deployed_services_ready()
@@ -621,24 +549,133 @@ class Controller:
         """
         self.config.setopt('current_state',
                            ControllerState.SERVICES.value)
-        self.ui.render_services_view(self.nodes, self.juju_state,
-                                     self.maas_state, self.config)
-        self.loop.redraw_screen()
+        self.update_node_states()
 
+    # Keyboard shortcuts ------------------------------------------------------
+    def unhandled_input(self, key):
+        AlarmMonitor.remove_all()
+
+        # Disable some keys while install wait is running
+        current_state = self.config.getopt('current_state')
+        if current_state == ControllerState.INSTALL_WAIT and \
+           key in ['a', 'A', 's', 'S', 'r', 'R']:
+            self.update_node_states()
+            return
+
+        if key in ['h', 'H']:
+            self.ui.show_help_info()
+        elif key in ['a', 'A']:
+            # Only allow add services if in the status view
+            if current_state != ControllerState.SERVICES:
+                return
+            self.config.setopt('current_state',
+                               ControllerState.ADD_SERVICES.value)
+
+            pc = PlacementController(
+                self.maas_state, self.config)
+
+            self.ui.render_add_services_dialog(
+                pc,
+                partial(async.submit, self.deploy_new_services,
+                        self.ui.show_exception_message),
+                self.cancel_add_services)
+
+        elif key in ['s', 'S']:
+            self.config.setopt('current_state', ControllerState.SERVICES.value)
+            self.update_node_states()
+        elif key in ['q', 'Q']:
+            EventLoop.exit(0)
+        elif key in ['r', 'R']:
+            self.ui.status_info_message("View was refreshed")
+            EventLoop.redraw_screen()
+        elif key in ['esc']:
+            log.debug("setting previous controller: {}".format(
+                self.ui.controller))
+            self.ui.frame.body = self.ui.controller
+            # Restart timer is previous controller is the INSTALL_WAIT
+            # view
+            if self.config.getopt('current_state') == \
+               ControllerState.INSTALL_WAIT:
+                self.update_node_install_wait()
+
+    # Redraw loops ------------------------------------------------------------
+    def update_node_states(self, *args, **kwargs):
+        """ Refresh the services view
+
+        This is the main redraw alarm for the services(status) view
+        """
+        AlarmMonitor.remove_all()
+
+        if not self.juju_state:
+            return
+        deployed_services = sorted(self.juju_state.services,
+                                   key=attrgetter('service_name'))
+        deployed_service_names = [s.service_name for s in deployed_services]
+
+        charm_classes = sorted(
+            [m.__charm_class__ for m in
+             utils.load_charms(self.config.getopt('charm_plugin_dir'))
+             if m.__charm_class__.charm_name in
+             deployed_service_names],
+            key=attrgetter('charm_name'))
+
+        self.nodes = list(zip(charm_classes, deployed_services))
+
+        if len(self.nodes) == 0:
+            return
+        else:
+            if not self.ui.services_view:
+                self.ui.render_services_view(
+                    self.nodes, self.juju_state,
+                    self.maas_state, self.config)
+            else:
+                self.ui.refresh_services_view(self.nodes, self.config)
+        AlarmMonitor.add_alarm(
+            EventLoop.set_alarm_in(0.3, self.update_node_states),
+            "core-controller-update-node-states")
+
+    def update_node_install_wait(self, *args, **kwargs):
+        """ Refresh install wait
+
+        This is the redraw alarm for during machine creation and configuration
+        """
+        AlarmMonitor.remove_all()
+        if self.ui.node_install_wait_view is None:
+            self.ui.render_node_install_wait(
+                "Installer is initializing nodes. Please wait.")
+        else:
+            self.ui.node_install_wait_view.redraw_kitt()
+        AlarmMonitor.add_alarm(
+            EventLoop.set_alarm_in(0.3, self.update_node_install_wait),
+            "core-controller-update")
+
+    # Main --------------------------------------------------------------------
     def start(self):
         """ Starts UI loop
         """
         if self.config.getopt('headless'):
             self.initialize()
         else:
+            EventLoop.build_loop(self.ui, self.config,
+                                 unhandled_input=self.unhandled_input)
             self.ui.status_info_message("Welcome")
             rel = self.config.getopt('openstack_release')
             label = OPENSTACK_RELEASE_LABELS[rel]
             self.ui.set_openstack_rel(label)
             self.initialize()
-            self.loop.register_callback('refresh_display', self.update)
-            AlarmMonitor.add_alarm(self.loop.set_alarm_in(0, self.update),
-                                   "controller-start")
+
+            # Initial state and rendered view
+            current_state = self.config.getopt('current_state')
+            if current_state == ControllerState.PLACEMENT:
+                self.ui.render_placement_view(self.config,
+                                              self.commit_placement)
+
+            elif current_state == ControllerState.SERVICES:
+                self.update_node_states()
+
+            elif current_state == ControllerState.INSTALL_WAIT:
+                self.update_node_install_wait()
+
             self.config.setopt("gui_started", True)
-            self.loop.run()
-            self.loop.close()
+
+            EventLoop.run()

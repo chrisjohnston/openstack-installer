@@ -23,16 +23,10 @@ import signal
 import sys
 from functools import partial
 
-# Handle imports where the path is not automatically updated during install.
-# This really only happens when a binary is not in the usual /usr/bin location
-lib_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, lib_dir)
-
 from cloudinstall.gui import PegasusGUI
 from cloudinstall.core import Controller
 from cloudinstall.consoleui import ConsoleUI
 from cloudinstall.ev import EventLoop
-from cloudinstall.alarms import AlarmMonitor
 from cloudinstall.api.container import Container
 from cloudinstall import utils
 from cloudinstall import log
@@ -124,14 +118,12 @@ if __name__ == '__main__':
                                  'openstack-status', config)
 
     if config.getopt('headless'):
-        ui = ConsoleUI()
+        ui = ConsoleUI(config)
     else:
-        ui = PegasusGUI()
+        ui = PegasusGUI(config)
 
-    ev = EventLoop(ui, config, logger)
-    AlarmMonitor.loop = ev
+    core = Controller(ui=ui, config=config)
 
-    core = Controller(ui=ui, config=config, loop=ev)
     # Create pidfile
     utils.spew(config.pidfile, str(os.getppid()), utils.install_user())
 
@@ -141,9 +133,6 @@ if __name__ == '__main__':
         core.start()
     except Exception as e:
         print("Error starting openstack-status: {}".format(e.args[0]))
-        if opts.debug and not config.getopt('headless'):
-            import pdb
-            pdb.post_mortem()
         raise e
     finally:
-        sys.exit(ev.error_code)
+        sys.exit(EventLoop.error_code)

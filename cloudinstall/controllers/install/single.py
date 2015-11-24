@@ -24,6 +24,7 @@ import platform
 import shutil
 from subprocess import call, check_call, check_output, STDOUT
 from cloudinstall import async, utils, netutils
+from cloudinstall.ev import EventLoop
 from cloudinstall.api.container import (Container,
                                         NoContainerIPException,
                                         ContainerRunException)
@@ -38,11 +39,10 @@ class SingleInstallException(Exception):
 
 class SingleInstall:
 
-    def __init__(self, loop, display_controller, config):
+    def __init__(self, display_controller, config):
         self.display_controller = display_controller
         self.config = config
-        self.loop = loop
-        self.tasker = self.display_controller.tasker(loop, config)
+        self.tasker = self.display_controller.tasker(config)
         self.progress_output = ""
         username = utils.install_user()
         self.container_name = 'openstack-single-{}'.format(username)
@@ -470,7 +470,7 @@ class SingleInstall:
         if self.config.getopt('install_only'):
             log.info("Done installing, stopping here per --install-only.")
             self.config.setopt('install_only', True)
-            self.loop.exit(0)
+            EventLoop.exit(0)
 
         # Update jujus no-proxy setting if applicable
         if self.config.getopt('http_proxy') or \
