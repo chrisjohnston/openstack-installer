@@ -119,10 +119,6 @@ def parse_options(argv):
     parser.add_argument('--next-charms', dest='next_charms',
                         action='store_true',
                         help="Use /next charms to test upcoming features.")
-    parser.add_argument('--use-nclxd', dest='use_nclxd', action="store_true",
-                        default=False,
-                        help="Enable LXD support for Nova Compute. Requires"
-                        "--series vivid to be set.")
     parser.add_argument('--topcontainer-type', dest='topcontainer_type',
                         choices=['lxc', 'lxd'], default='lxc',
                         help="Which container backend to use to create the "
@@ -191,11 +187,6 @@ if __name__ == '__main__':
     # see github issue #421:
     if os.environ.get("SHOW_JUJU_LOGS", False):
         cfg.setopt('show_logs', True)
-
-    # validate series exists for nclxd
-    if opts.use_nclxd and opts.ubuntu_series[0] < 'v':
-        print("You must pass --series vivid or higher in order to use nclxd.")
-        sys.exit(1)
 
     if opts.topcontainer_type == 'lxd':
         try:

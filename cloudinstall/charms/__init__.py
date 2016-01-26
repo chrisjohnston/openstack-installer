@@ -1,7 +1,4 @@
-#
-# charms.py - Charm instructions to Cloud Installer
-#
-# Copyright 2014, 2015 Canonical, Ltd.
+# Copyright 2014-2016 Canonical, Ltd.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -220,17 +217,7 @@ export OS_REGION_NAME=\"RegionOne\"
         if self.charm_rev:
             _charm_name_rev = "{}-{}".format(self.charm_name, self.charm_rev)
 
-        if self.config.getopt('use_nclxd'):
-            # nclxd support is only enabled on vivid and later, and we
-            # need to deploy from a local repo that has the right
-            # series in its path. The charmstore uses the LTS series
-            # name even for charms that support later series.
-
-            # Note, the constraint of vivid or later is checked in
-            # bin/openstack-install.
-            current_series = self.config.getopt('ubuntu_series')
-        else:
-            current_series = 'trusty'
+        current_series = 'trusty'
 
         if self.config.getopt('next_charms') and 'next' \
            in self.available_sources:
@@ -243,13 +230,6 @@ export OS_REGION_NAME=\"RegionOne\"
             raise Exception("{} is not found in available "
                             "sources: {}".format(self.charm_name,
                                                  self.available_sources))
-
-        # if --use-nclxd and not --next-charms, just download LTS charms
-        if self.config.getopt('use_nclxd'):
-            branch = "lp:charms/trusty/{}".format(self.charm_name)
-            self.bzr_get(branch, current_series)
-            self.local_deploy(machine_spec, current_series)
-            return False
 
         if self.subordinate:
             assert(num_units is None)
