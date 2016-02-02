@@ -54,7 +54,7 @@ class InstallController:
     def _set_install_type(self, install_type):
         self.install_type = install_type
         self.ui.show_password_input(
-            'Create a New OpenStack Password', self._save_password)
+            'Create a New Landscape Password', self._save_password)
 
     def _save_password(self, creds):
         """ Checks passwords match and proceeds
@@ -63,7 +63,7 @@ class InstallController:
         if password.isdigit():
             self.ui.status_error_message("Password must not be a number")
             return self.ui.show_password_input(
-                'Create a New OpenStack Password', self._save_password)
+                'Create a New Landscape Password', self._save_password)
         if 'confirm_password' in creds:
             confirm_password = creds['confirm_password'].value
         if password and password == confirm_password:
@@ -72,7 +72,7 @@ class InstallController:
         else:
             self.ui.status_error_message('Passwords did not match')
             return self.ui.show_password_input(
-                'Create a New OpenStack Password', self._save_password)
+                'Create a New Landscape Password', self._save_password)
 
     def _save_maas_creds(self, creds):
         maas_server = creds['maas_server'].value
